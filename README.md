@@ -1,198 +1,253 @@
-# Auto Copilot Experiment - README
+# Auto Copilot Experiment
 
-## Arquitetura
+## 🎯 Contexto e Motivação
 
-### Stack
-- **n8n**: Orquestração e workflows (container Docker)
-- **PostgreSQL**: Banco de dados (container Docker) 
-- **OpenAI API**: Processamento de linguagem natural
-- **Docker Compose**: Gerenciamento dos containers
+Experimento para criar um sistema de **extração automática de dados** que evolui e aprende, usando **n8n + OpenAI + PostgreSQL**. O objetivo é construir um "copiloto" que:
 
-### Estrutura do Banco de Dados
+- **Recebe textos não estruturados** (emails, mensagens, formulários)
+- **Extrai dados estruturados** automaticamente
+- **Aprende com feedback** e melhora a precisão ao longo do tempo
+- **Se adapta a diferentes domínios** e necessidades
+
+## 🏗️ Visão Geral da Arquitetura
+
+```
+[Input] → [n8n Orchestration] → [OpenAI Processing] → [PostgreSQL Storage] → [Learning Loop]
+```
+
+**Stack Tecnológica:**
+- **n8n**: Orquestração de workflows (localhost:5678)
+- **PostgreSQL**: Banco de dados da aplicação (localhost:5433)
+- **PostgREST**: API REST automática (localhost:3000)
+- **OpenAI GPT-4**: Processamento de linguagem natural
+- **Docker**: Containerização completa
+
+## 📊 Estrutura de Dados
 
 ```sql
--- Tabela principal de interações
+-- Tabela principal: interações processadas
 CREATE TABLE interactions (
     id SERIAL PRIMARY KEY,
-    text_input TEXT NOT NULL,
-    processed_data JSONB,
-    status VARCHAR(50), -- 'processed', 'validating', 'completed'
-    confidence_score DECIMAL(3,2),
+    text_input TEXT NOT NULL,           -- Texto original
+    processed_data JSONB,               -- Dados extraídos (JSON)
+    status VARCHAR(50),                 -- 'processed', 'validating', 'completed'
+    confidence_score DECIMAL(3,2),      -- Confiança na extração (0-1)
     created_at TIMESTAMP DEFAULT NOW(),
     updated_at TIMESTAMP DEFAULT NOW()
 );
 
--- Preferências definidas pelo usuário (Fase 2)
+-- Preferências do usuário (Fase 2+)
 CREATE TABLE user_preferences (
     id SERIAL PRIMARY KEY,
-    field_name VARCHAR(100),
-    mapping_rule TEXT,
-    context TEXT,
+    field_name VARCHAR(100),            -- Nome do campo
+    mapping_rule TEXT,                  -- Regra de mapeamento
+    context TEXT,                       -- Contexto específico
     created_at TIMESTAMP DEFAULT NOW()
 );
 
 -- Histórico de aprendizado (Fase 3)
 CREATE TABLE learning_history (
     id SERIAL PRIMARY KEY,
-    pattern TEXT,
-    correction TEXT,
-    frequency INTEGER DEFAULT 1,
+    pattern TEXT,                       -- Padrão identificado
+    correction TEXT,                    -- Correção aplicada
+    frequency INTEGER DEFAULT 1,       -- Frequência do padrão
     last_seen TIMESTAMP DEFAULT NOW()
 );
 ```
 
-## Implementação das Fases
+## 🚀 Implementação por Fases
 
-### Fase 1: Automação Básica
-**Fluxo n8n:**
-1. **Webhook** - recebe texto não estruturado
-2. **OpenAI** - extrai campos pré-definidos (nome, idade, profissão)
-3. **PostgreSQL** - insere dados processados
-4. **Response** - retorna sucesso
+### ✅ Fase 1: Automação Básica (IMPLEMENTADA)
 
-**Payload de entrada:**
+**Objetivo**: Extração básica de campos pré-definidos
+
+**Workflow n8n atual:**
+```
+[Webhook/Manual] → [Code] → [OpenAI] → [Code1] → [HTTP Request] → [Response]
+```
+
+**Funcionalidades:**
+- ✅ Recebe texto via webhook (`/fase1`) ou interface manual
+- ✅ Extrai campos fixos: nome, idade, profissão
+- ✅ Salva no PostgreSQL via PostgREST
+- ✅ Retorna confirmação de sucesso
+- ✅ Visualização de dados via workflow separado
+
+**Exemplo:**
 ```json
+// Input
+{"text": "João Silva, 30 anos, desenvolvedor Python"}
+
+// Output salvo
 {
-  "text": "João Silva, 30 anos, engenheiro de software, mora em SP"
+  "text_input": "João Silva, 30 anos, desenvolvedor Python",
+  "processed_data": "{\"nome\": \"João Silva\", \"idade\": 30, \"profissao\": \"desenvolvedor Python\"}",
+  "status": "processed",
+  "confidence_score": 0.8
 }
 ```
 
-### Fase 2: Campos Dinâmicos + Reasoning Loop
-**Fluxo n8n:**
-1. **Webhook** - recebe texto + campos desejados
-2. **OpenAI** - extrai campos dinâmicos
-3. **PostgreSQL** - insere dados
-4. **OpenAI Reasoning** - avalia coerência do resultado
-5. **IF** - se confiança > 80% → fim, senão → validação
-6. **HTTP Request** - notifica para validação manual (se necessário)
+### 🔄 Fase 2: Campos Dinâmicos + Reasoning Loop (PLANEJADA)
 
-**Payload de entrada:**
+**Objetivo**: Sistema inteligente que se auto-valida e pede ajuda quando necessário
+
+**Fluxo proposto:**
+```
+[Receptor] → [Interpretador] → [Salvar no Banco] → [Reasoning Loop] → [Fim/Validação]
+```
+
+**Funcionalidades planejadas:**
+- 🎯 **Campos configuráveis**: Usuário define quais campos extrair
+- 🤖 **Auto-validação**: Sistema avalia a qualidade da própria extração
+- 🔄 **Reasoning loop**: 
+  - Se confiança > 80% → marca como "completed"
+  - Se confiança < 80% → marca como "validating" e solicita feedback humano
+- 📊 **Adaptação**: Ajusta comportamento baseado em dados ambíguos
+- 🎛️ **API dinâmica**: `{"text": "...", "fields": ["campo1", "campo2"]}`
+
+**Payload expandido:**
 ```json
 {
-  "text": "João Silva, 30 anos, engenheiro de software, mora em SP",
-  "fields": ["nome", "idade", "profissao", "cidade"]
+  "text": "Maria Santos trabalha há 5 anos como gerente de produto na empresa X",
+  "fields": ["nome", "cargo", "experiencia_anos", "empresa"],
+  "confidence_threshold": 0.85
 }
 ```
 
-### Fase 3: Aprendizado e Contexto
-**Fluxo n8n:**
-1. **Webhook** - recebe texto + campos
-2. **PostgreSQL** - consulta preferências e histórico
-3. **Code Node** - monta prompt com contexto personalizado
-4. **OpenAI** - processa com contexto
-5. **PostgreSQL** - insere resultado
-6. **OpenAI Reasoning** - avalia com histórico
-7. **PostgreSQL** - atualiza aprendizado baseado em resultado
+### 🧠 Fase 3: Sistema de Aprendizado (VISÃO FUTURA)
 
-## Setup com Docker
+**Objetivo**: Memória persistente que melhora continuamente
 
-### docker-compose.yml
-```yaml
-version: '3.8'
-services:
-  n8n:
-    image: n8nio/n8n
-    ports:
-      - "5678:5678"
-    environment:
-      - DB_TYPE=postgresdb
-      - DB_POSTGRESDB_HOST=postgres
-      - DB_POSTGRESDB_PORT=5432
-      - DB_POSTGRESDB_DATABASE=n8n
-      - DB_POSTGRESDB_USER=n8n
-      - DB_POSTGRESDB_PASSWORD=n8n
-      - N8N_BASIC_AUTH_ACTIVE=false
-    volumes:
-      - n8n_data:/home/node/.n8n
-    depends_on:
-      - postgres
+**Funcionalidades visionadas:**
+- 📚 **Memória de contexto**: Lembra padrões e preferências anteriores
+- 🔄 **Feedback loop**: Aprende com correções manuais
+- 🎯 **Personalização**: Adapta-se ao estilo e domínio específico do usuário
+- 📈 **Melhoria contínua**: Aumenta precisão ao longo do tempo
+- 🗂️ **Histórico inteligente**: Usa interações passadas como contexto
 
-  postgres:
-    image: postgres:15
-    environment:
-      - POSTGRES_USER=n8n
-      - POSTGRES_PASSWORD=n8n
-      - POSTGRES_DB=n8n
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    ports:
-      - "5432:5432"
-
-  app_postgres:
-    image: postgres:15
-    environment:
-      - POSTGRES_USER=autocopilot
-      - POSTGRES_PASSWORD=autocopilot
-      - POSTGRES_DB=autocopilot
-    volumes:
-      - app_postgres_data:/var/lib/postgresql/data
-    ports:
-      - "5433:5432"
-
-volumes:
-  n8n_data:
-  postgres_data:
-  app_postgres_data:
+**Exemplo de evolução:**
+```
+Interação 1: "João Silva, eng. software" → aprende que "eng." = "engenheiro"
+Interação 50: "Maria Santos, eng. civil" → automaticamente entende o padrão
 ```
 
-### Comandos para iniciar:
+## ⚡ Uso Atual (Fase 1)
+
+### 🖥️ Interface de Desenvolvimento:
+```json
+// Manual Trigger no n8n:
+{
+  "body": {
+    "text": "Ana Costa, 28 anos, designer UX"
+  }
+}
+```
+
+### 🌐 API de Produção:
+```powershell
+# Processar texto
+Invoke-RestMethod -Uri "http://localhost:5678/webhook/fase1" -Method POST -ContentType "application/json" -Body '{"text": "Pedro Santos, 32 anos, arquiteto de software"}'
+
+# Ver dados salvos
+Invoke-RestMethod -Uri "http://localhost:3000/interactions" -Method GET
+
+# Limpar banco para testes
+Invoke-RestMethod -Uri "http://localhost:3000/interactions" -Method DELETE
+```
+
+### 📊 Visualização:
+- **Workflow "Database Viewer"**: Consulta visual via n8n
+- **API direta**: PostgREST em `localhost:3000`
+- **Logs**: `docker-compose logs -f n8n`
+
+## 🔧 Configuração e Execução
+
+### Arquivo `.env` essencial:
 ```bash
-# Subir containers
+# OpenAI (obrigatório)
+OPENAI_API_KEY=sua-chave-aqui
+
+# Segurança n8n
+N8N_ENCRYPTION_KEY=chave-unica-gerada-32-chars
+N8N_PASSWORD=admin123
+
+# Bancos de dados
+N8N_DB_PASSWORD=n8n_secure_password_2024
+APP_DB_PASSWORD=app_secure_password_2024
+```
+
+### Comandos principais:
+```bash
+# Iniciar ambiente completo
 docker-compose up -d
 
-# Acessar n8n
-http://localhost:5678
+# Status dos serviços
+docker-compose ps
 
-# Conectar ao banco da aplicação
-docker exec -it <app_postgres_container> psql -U autocopilot -d autocopilot
+# Logs em tempo real
+docker-compose logs -f
 ```
 
-## Configuração do n8n
+## 🎯 Métricas de Sucesso por Fase
 
-### Credenciais necessárias:
-1. **OpenAI API** - adicionar chave da API
-2. **PostgreSQL** - configurar conexão com app_postgres (porta 5433)
+### Fase 1 (Atual):
+- ✅ Taxa de extração correta dos campos
+- ✅ Tempo de processamento < 3s
+- ✅ Zero falhas de infraestrutura
 
-### Webhooks para teste:
-- **Fase 1**: `http://localhost:5678/webhook/phase1`
-- **Fase 2**: `http://localhost:5678/webhook/phase2` 
-- **Fase 3**: `http://localhost:5678/webhook/phase3`
+### Fase 2 (Próxima):
+- 🎯 Taxa de auto-validação > 80%
+- 🎯 Redução de intervenção manual em 60%
+- 🎯 Suporte a campos dinâmicos
 
-## Testes
+### Fase 3 (Futuro):
+- 🔮 Melhoria contínua de precisão
+- 🔮 Adaptação automática a novos domínios
+- 🔮 Redução de intervenção manual em 90%
 
-### Exemplos de textos para testar:
+## 📁 Onde Encontrar os Dados
+
+**Configurações do n8n:**
+- Volume: `n8n_data`
+- Banco: `n8n_postgres` (porta 5432)
+- Workflows salvos automaticamente
+
+**Dados da aplicação:**
+- Banco: `app_postgres` (porta 5433)
+- API: PostgREST (porta 3000)
+- Dados persistentes via volumes Docker
+
+## 🐛 Debug e Troubleshooting
+
 ```bash
-# Fase 1 - campos fixos
-curl -X POST http://localhost:5678/webhook/phase1 \
-  -H "Content-Type: application/json" \
-  -d '{"text": "Maria Santos, 28 anos, desenvolvedora Python, Rio de Janeiro"}'
+# Health checks
+curl http://localhost:5678/healthz    # n8n
+curl http://localhost:3000/           # PostgREST
 
-# Fase 2 - campos dinâmicos  
-curl -X POST http://localhost:5678/webhook/phase2 \
-  -H "Content-Type: application/json" \
-  -d '{
-    "text": "João Silva, 5 anos de experiência, salário 8000 reais",
-    "fields": ["nome", "experiencia_anos", "salario"]
-  }'
+# Verificar bancos
+docker exec app_postgres pg_isready -U app_user
+docker exec n8n_postgres pg_isready -U n8n
+
+# Logs específicos
+docker-compose logs n8n           # Workflows
+docker-compose logs app_postgres  # Banco dados
+docker-compose logs postgrest     # API REST
 ```
 
-## Métricas de Sucesso
+## 🗺️ Roadmap de Desenvolvimento
 
-### Fase 1:
-- Taxa de extração correta dos campos
-- Tempo de processamento
+### Próximos passos imediatos (Fase 2):
+1. **Implementar campos dinâmicos** no payload de entrada
+2. **Adicionar reasoning loop** com OpenAI para auto-validação
+3. **Criar sistema de confiança** baseado em scoring
+4. **Implementar queue de validação** para casos ambíguos
 
-### Fase 2:
-- Taxa de auto-validação (casos que não precisaram de intervenção humana)
-- Precisão do reasoning loop
+### Visão de longo prazo (Fase 3):
+1. **Sistema de preferências** persistente por usuário
+2. **Aprendizado de padrões** baseado em histórico
+3. **Contexto inteligente** usando interações anteriores
+4. **API de feedback** para correções e melhorias
 
-### Fase 3:
-- Redução de casos de validação manual ao longo do tempo
-- Melhoria na precisão com base no aprendizado
+---
 
-## Próximos Passos
-
-1. **Setup inicial**: Configurar Docker + n8n + PostgreSQL
-2. **Fase 1**: Implementar fluxo básico
-3. **Fase 2**: Adicionar reasoning loop
-4. **Fase 3**: Implementar sistema de aprendizado
+**Para Claude**: Este é um experimento de IA evolutiva. A Fase 1 funciona perfeitamente. Use os comandos PowerShell acima para interagir com o sistema atual. O objetivo final é criar um sistema que aprende e melhora sozinho.
