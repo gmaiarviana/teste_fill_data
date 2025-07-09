@@ -81,6 +81,32 @@ services:
       retries: 5
       start_period: 30s
 
+  # PostgREST - API REST automática para PostgreSQL
+  postgrest:
+    image: postgrest/postgrest:latest
+    container_name: postgrest
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - PGRST_DB_URI=postgresql://${APP_DB_USER:-app_user}:${APP_DB_PASSWORD:-app_password}@app_postgres:5432/${APP_DB_NAME:-app_db}
+      - PGRST_DB_SCHEMAS=public
+      - PGRST_DB_ANON_ROLE=${APP_DB_USER:-app_user}
+      - PGRST_JWT_SECRET=${POSTGREST_JWT_SECRET:-your-jwt-secret-change-this}
+      - PGRST_DB_POOL=${POSTGREST_DB_POOL:-10}
+      - PGRST_DB_POOL_ACQUISITION_TIMEOUT=10
+    depends_on:
+      app_postgres:
+        condition: service_healthy
+    networks:
+      - n8n_network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
 volumes:
   n8n_data:
     driver: local

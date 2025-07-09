@@ -80,6 +80,17 @@ docker-compose logs -f n8n_postgres app_postgres
 - **Usuário**: app_user
 - **Senha**: app_secure_password_2024
 
+### PostgREST - API REST PostgreSQL
+- **URL**: http://localhost:3000
+- **Documentação automática**: http://localhost:3000/
+- **Swagger/OpenAPI**: Detecta automaticamente as tabelas e cria endpoints
+
+**Endpoints principais:**
+- `GET /interactions` - Listar interações
+- `POST /interactions` - Criar nova interação
+- `GET /user_preferences` - Listar preferências
+- `GET /learning_history` - Histórico de aprendizado
+
 ## 🔧 Comandos Úteis para Desenvolvimento
 
 ### Gerenciamento de Containers
@@ -170,6 +181,9 @@ docker-compose logs n8n | grep -i error
 # Logs de erro dos bancos
 docker-compose logs n8n_postgres | grep -i error
 docker-compose logs app_postgres | grep -i error
+
+# Logs de erro do PostgREST
+docker-compose logs postgrest | grep -i error
 ```
 
 ### Verificar conectividade entre containers
@@ -180,6 +194,9 @@ docker exec n8n ping n8n_postgres
 # Verificar se os bancos estão respondendo
 docker exec n8n_postgres pg_isready -U n8n
 docker exec app_postgres pg_isready -U app_user
+
+# Verificar se o PostgREST está respondendo
+docker exec postgrest curl -f http://localhost:3000/
 ```
 
 ### Problemas Comuns
@@ -190,6 +207,7 @@ docker exec app_postgres pg_isready -U app_user
 netstat -ano | findstr :5678
 netstat -ano | findstr :5432
 netstat -ano | findstr :5433
+netstat -ano | findstr :3000
 
 # Parar o processo que está usando a porta
 taskkill /PID <PID> /F
@@ -229,6 +247,34 @@ Os containers possuem health checks configurados:
 - **n8n**: Verifica se a aplicação responde na porta 5678
 - **n8n_postgres**: Verifica se o PostgreSQL está pronto
 - **app_postgres**: Verifica se o PostgreSQL está pronto
+- **postgrest**: Verifica se a API REST está respondendo
+
+### Testando o PostgREST
+
+#### Teste rápido via PowerShell
+```powershell
+# Verificar se a API está rodando
+Invoke-RestMethod -Uri "http://localhost:3000/" -Method GET
+
+# Listar interações
+Invoke-RestMethod -Uri "http://localhost:3000/interactions" -Method GET
+
+# Inserir dados de teste
+$testData = @{
+    text_input = "João Silva, 30 anos, desenvolvedor"
+    processed_data = '{"nome": "João Silva", "idade": 30}'
+    status = "processed"
+    confidence_score = 0.85
+} | ConvertTo-Json
+
+Invoke-RestMethod -Uri "http://localhost:3000/interactions" -Method POST -ContentType "application/json" -Body $testData
+```
+
+#### Teste completo via script
+```powershell
+# Executar script de teste completo
+.\test-api.ps1
+```
 
 ## 🔐 Segurança
 
@@ -250,13 +296,16 @@ OPENAI_API_KEY=<sua-chave-real>
 N8N_PASSWORD=<senha-forte>
 N8N_DB_PASSWORD=<senha-forte>
 APP_DB_PASSWORD=<senha-forte>
+POSTGREST_JWT_SECRET=<chave-jwt-única>
 ```
 
 ## 📚 Próximos Passos
 
 1. **Configure sua OPENAI_API_KEY** no arquivo `.env`
-2. **Acesse o n8n** em http://localhost:5678
-3. **Crie seu primeiro workflow** de automação
+2. **Configure o POSTGREST_JWT_SECRET** no arquivo `.env`
+3. **Acesse o n8n** em http://localhost:5678
+4. **Teste o PostgREST** em http://localhost:3000
+5. **Crie seu primeiro workflow** de automação usando HTTP Request ao invés do nó PostgreSQL
 4. **Conecte com o banco de dados** da aplicação
 5. **Teste as integrações** com OpenAI
 
