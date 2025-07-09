@@ -165,3 +165,5 @@ workflow_backups/
 # Local development files
 local/
 dev/ 
+
+.env
