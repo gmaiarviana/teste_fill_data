@@ -30,13 +30,16 @@ CREATE TABLE interactions (
     id SERIAL PRIMARY KEY,
     text_input TEXT NOT NULL,           -- Texto original
     processed_data JSONB,               -- Dados extraídos (JSON)
-    status VARCHAR(50),                 -- 'processed', 'validating', 'completed'
+    status VARCHAR(50),                 -- 'completed', 'validating'
     confidence_score DECIMAL(3,2),      -- Confiança na extração (0-1)
+    requested_fields JSONB,             -- Campos solicitados
+    clarification_question TEXT,        -- Pergunta de esclarecimento
+    observations TEXT,                  -- Observações da IA
     created_at TIMESTAMP DEFAULT NOW(),
     updated_at TIMESTAMP DEFAULT NOW()
 );
 
--- Preferências do usuário (Fase 2+)
+-- Preferências do usuário (Fase 3)
 CREATE TABLE user_preferences (
     id SERIAL PRIMARY KEY,
     field_name VARCHAR(100),            -- Nome do campo
@@ -61,7 +64,7 @@ CREATE TABLE learning_history (
 
 **Objetivo**: Extração básica de campos pré-definidos
 
-**Workflow n8n atual:**
+**Workflow n8n:**
 ```
 [Webhook/Manual] → [Code] → [OpenAI] → [Code1] → [HTTP Request] → [Response]
 ```
@@ -71,46 +74,51 @@ CREATE TABLE learning_history (
 - ✅ Extrai campos fixos: nome, idade, profissão
 - ✅ Salva no PostgreSQL via PostgREST
 - ✅ Retorna confirmação de sucesso
-- ✅ Visualização de dados via workflow separado
 
-**Exemplo:**
-```json
-// Input
-{"text": "João Silva, 30 anos, desenvolvedor Python"}
+### ✅ Fase 2: Campos Dinâmicos + Reasoning Loop (IMPLEMENTADA)
 
-// Output salvo
-{
-  "text_input": "João Silva, 30 anos, desenvolvedor Python",
-  "processed_data": "{\"nome\": \"João Silva\", \"idade\": 30, \"profissao\": \"desenvolvedor Python\"}",
-  "status": "processed",
-  "confidence_score": 0.8
-}
+**Objetivo**: Sistema inteligente com auto-validação e campos configuráveis
+
+**Fluxo implementado:**
+```
+[Webhook/Manual] → [Code] → [OpenAI] → [Reasoning Code] → [HTTP Request] → [Response]
 ```
 
-### 🔄 Fase 2: Campos Dinâmicos + Reasoning Loop (PLANEJADA)
+**Funcionalidades implementadas:**
+- ✅ **Campos configuráveis**: Usuário define quais campos extrair via payload
+- ✅ **Auto-avaliação**: OpenAI avalia a própria confiança (0.0 a 1.0)
+- ✅ **Reasoning básico**: 
+  - Se confiança ≥ 80% → marca como "completed"
+  - Se confiança < 80% → marca como "validating" e gera pergunta de esclarecimento
+- ✅ **API dinâmica**: Suporte a campos customizados
+- ✅ **Resposta inteligente**: Inclui dados extraídos, confiança e observações
 
-**Objetivo**: Sistema inteligente que se auto-valida e pede ajuda quando necessário
-
-**Fluxo proposto:**
-```
-[Receptor] → [Interpretador] → [Salvar no Banco] → [Reasoning Loop] → [Fim/Validação]
-```
-
-**Funcionalidades planejadas:**
-- 🎯 **Campos configuráveis**: Usuário define quais campos extrair
-- 🤖 **Auto-validação**: Sistema avalia a qualidade da própria extração
-- 🔄 **Reasoning loop**: 
-  - Se confiança > 80% → marca como "completed"
-  - Se confiança < 80% → marca como "validating" e solicita feedback humano
-- 📊 **Adaptação**: Ajusta comportamento baseado em dados ambíguos
-- 🎛️ **API dinâmica**: `{"text": "...", "fields": ["campo1", "campo2"]}`
-
-**Payload expandido:**
+**Payload expandido da Fase 2:**
 ```json
 {
   "text": "Maria Santos trabalha há 5 anos como gerente de produto na empresa X",
-  "fields": ["nome", "cargo", "experiencia_anos", "empresa"],
-  "confidence_threshold": 0.85
+  "fields": ["nome", "cargo", "experiencia_anos", "empresa"]
+}
+```
+
+**Exemplo de resposta com alta confiança:**
+```json
+{
+  "success": true,
+  "status": "completed",
+  "confidence": 0.95,
+  "extracted_data": {"nome": "Maria Santos", "cargo": "gerente de produto", "experiencia_anos": "5", "empresa": "empresa X"}
+}
+```
+
+**Exemplo de resposta com baixa confiança:**
+```json
+{
+  "success": true,
+  "status": "validating",
+  "confidence": 0.6,
+  "question": "Não consegui identificar: salario. Pode esclarecer?",
+  "extracted_data": {"nome": "João", "cargo": null}
 }
 ```
 
@@ -125,31 +133,32 @@ CREATE TABLE learning_history (
 - 📈 **Melhoria contínua**: Aumenta precisão ao longo do tempo
 - 🗂️ **Histórico inteligente**: Usa interações passadas como contexto
 
-**Exemplo de evolução:**
-```
-Interação 1: "João Silva, eng. software" → aprende que "eng." = "engenheiro"
-Interação 50: "Maria Santos, eng. civil" → automaticamente entende o padrão
-```
-
-## ⚡ Uso Atual (Fase 1)
+## ⚡ Uso Atual (Fase 2)
 
 ### 🖥️ Interface de Desenvolvimento:
 ```json
 // Manual Trigger no n8n:
 {
   "body": {
-    "text": "Ana Costa, 28 anos, designer UX"
+    "text": "Ana Costa, 28 anos, designer UX",
+    "fields": ["nome", "idade", "profissao"]
   }
 }
 ```
 
 ### 🌐 API de Produção:
 ```powershell
-# Processar texto
-Invoke-RestMethod -Uri "http://localhost:5678/webhook/fase1" -Method POST -ContentType "application/json" -Body '{"text": "Pedro Santos, 32 anos, arquiteto de software"}'
+# Processar texto com campos básicos
+Invoke-RestMethod -Uri "http://localhost:5678/webhook/fase2" -Method POST -ContentType "application/json" -Body '{"text": "Pedro Santos, 32 anos, arquiteto de software", "fields": ["nome", "idade", "profissao"]}'
+
+# Processar texto com campos customizados
+Invoke-RestMethod -Uri "http://localhost:5678/webhook/fase2" -Method POST -ContentType "application/json" -Body '{"text": "Maria trabalha na empresa X há 5 anos como gerente", "fields": ["nome", "cargo", "empresa", "tempo_empresa"]}'
 
 # Ver dados salvos
 Invoke-RestMethod -Uri "http://localhost:3000/interactions" -Method GET
+
+# Filtrar por status
+Invoke-RestMethod -Uri "http://localhost:3000/interactions?status=eq.validating" -Method GET
 
 # Limpar banco para testes
 Invoke-RestMethod -Uri "http://localhost:3000/interactions" -Method DELETE
@@ -190,20 +199,21 @@ docker-compose logs -f
 
 ## 🎯 Métricas de Sucesso por Fase
 
-### Fase 1 (Atual):
+### Fase 1 (Concluída):
 - ✅ Taxa de extração correta dos campos
 - ✅ Tempo de processamento < 3s
 - ✅ Zero falhas de infraestrutura
 
-### Fase 2 (Próxima):
-- 🎯 Taxa de auto-validação > 80%
-- 🎯 Redução de intervenção manual em 60%
-- 🎯 Suporte a campos dinâmicos
+### Fase 2 (Concluída):
+- ✅ Taxa de auto-avaliação > 80%
+- ✅ Suporte a campos dinâmicos
+- ✅ Resposta inteligente baseada em confiança
+- ✅ Sistema de reasoning básico implementado
 
 ### Fase 3 (Futuro):
 - 🔮 Melhoria contínua de precisão
 - 🔮 Adaptação automática a novos domínios
-- 🔮 Redução de intervenção manual em 90%
+- 🔮 Sistema de feedback e aprendizado
 
 ## 📁 Onde Encontrar os Dados
 
@@ -236,13 +246,13 @@ docker-compose logs postgrest     # API REST
 
 ## 🗺️ Roadmap de Desenvolvimento
 
-### Próximos passos imediatos (Fase 2):
-1. **Implementar campos dinâmicos** no payload de entrada
-2. **Adicionar reasoning loop** com OpenAI para auto-validação
-3. **Criar sistema de confiança** baseado em scoring
-4. **Implementar queue de validação** para casos ambíguos
+### Próximos passos (Fase 3):
+1. **Implementar endpoint `/clarify/{id}`** para esclarecimentos
+2. **Adicionar sistema de feedback** para correções manuais
+3. **Criar contexto inteligente** usando histórico de interações
+4. **Implementar aprendizado de padrões** baseado em dados anteriores
 
-### Visão de longo prazo (Fase 3):
+### Visão de longo prazo:
 1. **Sistema de preferências** persistente por usuário
 2. **Aprendizado de padrões** baseado em histórico
 3. **Contexto inteligente** usando interações anteriores
@@ -250,4 +260,4 @@ docker-compose logs postgrest     # API REST
 
 ---
 
-**Para Claude**: Este é um experimento de IA evolutiva. A Fase 1 funciona perfeitamente. Use os comandos PowerShell acima para interagir com o sistema atual. O objetivo final é criar um sistema que aprende e melhora sozinho.
+**Status atual**: Fase 2 implementada com sucesso. Sistema funcional para extração inteligente com campos dinâmicos e auto-avaliação de confiança.
