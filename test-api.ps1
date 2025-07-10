@@ -234,6 +234,186 @@ try {
 }
 
 # =============================================================================
+# TESTE FASE 2: Funcionalidades Avançadas
+# =============================================================================
+Write-Host "`n📋 TESTE FASE 2: Testando funcionalidades avançadas..." -ForegroundColor Yellow
+
+# Configuração para testes da Fase 2
+$n8nBaseUrl = "http://localhost:5678"
+$fase2Endpoint = "$n8nBaseUrl/webhook/fase2"
+
+# Verificar se n8n está rodando
+Write-Host "   🔍 Verificando se n8n está rodando..." -ForegroundColor Gray
+try {
+    $n8nResponse = Invoke-RestMethod -Uri "$n8nBaseUrl/healthz" -Method GET -TimeoutSec 5
+    Write-Host "   ✅ n8n está rodando" -ForegroundColor Green
+} catch {
+    Write-Host "   ❌ n8n não está acessível. Verifique se está rodando em localhost:5678" -ForegroundColor Red
+    Write-Host "   💡 Execute: docker-compose up -d" -ForegroundColor Yellow
+}
+
+# =============================================================================
+# TESTE 2.1: Payload com campos dinâmicos básicos
+# =============================================================================
+Write-Host "`n   📋 Teste 2.1: Campos dinâmicos básicos..." -ForegroundColor Yellow
+
+$basicPayload = @{
+    text = "João Silva, 30 anos, desenvolvedor"
+    fields = @("nome", "idade", "profissao")
+} | ConvertTo-Json
+
+try {
+    $response = Invoke-RestMethod -Uri $fase2Endpoint -Method POST -ContentType "application/json" -Body $basicPayload -TimeoutSec 15
+    Write-Host "   ✅ Resposta recebida com sucesso" -ForegroundColor Green
+    Write-Host "   📊 Status: $($response.status)" -ForegroundColor Gray
+    Write-Host "   🎯 Confiança: $($response.confidence)" -ForegroundColor Gray
+    Write-Host "   📝 Dados extraídos: $($response.extracted_data | ConvertTo-Json -Compress)" -ForegroundColor Gray
+    
+    if ($response.status -eq "completed") {
+        Write-Host "   ✅ Status 'completed' - alta confiança detectada" -ForegroundColor Green
+    } elseif ($response.status -eq "validating") {
+        Write-Host "   ⚠️  Status 'validating' - baixa confiança, precisa esclarecimento" -ForegroundColor Yellow
+        Write-Host "   ❓ Pergunta: $($response.question)" -ForegroundColor Gray
+    }
+} catch {
+    Write-Host "   ❌ Erro no teste básico: $($_.Exception.Message)" -ForegroundColor Red
+}
+
+# =============================================================================
+# TESTE 2.2: Payload com campos customizados
+# =============================================================================
+Write-Host "`n   📋 Teste 2.2: Campos customizados..." -ForegroundColor Yellow
+
+$customPayload = @{
+    text = "Maria trabalha na empresa X há 5 anos como gerente"
+    fields = @("nome", "cargo", "empresa", "tempo_empresa")
+} | ConvertTo-Json
+
+try {
+    $response = Invoke-RestMethod -Uri $fase2Endpoint -Method POST -ContentType "application/json" -Body $customPayload -TimeoutSec 15
+    Write-Host "   ✅ Resposta recebida com sucesso" -ForegroundColor Green
+    Write-Host "   📊 Status: $($response.status)" -ForegroundColor Gray
+    Write-Host "   🎯 Confiança: $($response.confidence)" -ForegroundColor Gray
+    Write-Host "   📝 Dados extraídos: $($response.extracted_data | ConvertTo-Json -Compress)" -ForegroundColor Gray
+    
+    # Verificar se os campos customizados foram processados
+    $extractedData = $response.extracted_data
+    if ($extractedData.cargo -or $extractedData.empresa -or $extractedData.tempo_empresa) {
+        Write-Host "   ✅ Campos customizados processados corretamente" -ForegroundColor Green
+    } else {
+        Write-Host "   ⚠️  Campos customizados não foram extraídos" -ForegroundColor Yellow
+    }
+} catch {
+    Write-Host "   ❌ Erro no teste customizado: $($_.Exception.Message)" -ForegroundColor Red
+}
+
+# =============================================================================
+# TESTE 2.3: Cenário de texto ambíguo para baixa confiança
+# =============================================================================
+Write-Host "`n   📋 Teste 2.3: Texto ambíguo (baixa confiança)..." -ForegroundColor Yellow
+
+$ambiguousPayload = @{
+    text = "João trabalha há um tempo"
+    fields = @("nome", "cargo", "tempo_empresa", "salario")
+} | ConvertTo-Json
+
+try {
+    $response = Invoke-RestMethod -Uri $fase2Endpoint -Method POST -ContentType "application/json" -Body $ambiguousPayload -TimeoutSec 15
+    Write-Host "   ✅ Resposta recebida com sucesso" -ForegroundColor Green
+    Write-Host "   📊 Status: $($response.status)" -ForegroundColor Gray
+    Write-Host "   🎯 Confiança: $($response.confidence)" -ForegroundColor Gray
+    
+    if ($response.status -eq "validating") {
+        Write-Host "   ✅ Status 'validating' detectado corretamente" -ForegroundColor Green
+        Write-Host "   ❓ Pergunta de esclarecimento: $($response.question)" -ForegroundColor Gray
+    } elseif ($response.confidence -lt 0.8) {
+        Write-Host "   ✅ Baixa confiança detectada (< 0.8)" -ForegroundColor Green
+    } else {
+        Write-Host "   ⚠️  Confiança inesperadamente alta para texto ambíguo" -ForegroundColor Yellow
+    }
+} catch {
+    Write-Host "   ❌ Erro no teste ambíguo: $($_.Exception.Message)" -ForegroundColor Red
+}
+
+# =============================================================================
+# TESTE 2.4: Validação das novas colunas no banco
+# =============================================================================
+Write-Host "`n   📋 Teste 2.4: Validando novas colunas no banco..." -ForegroundColor Yellow
+
+# Aguardar um pouco para garantir que os dados foram salvos
+Start-Sleep -Seconds 2
+
+try {
+    # Buscar registros recentes
+    $recentRecords = Invoke-RestMethod -Uri "$baseUrl/$testTable?order=created_at.desc&limit=5" -Method GET -TimeoutSec 10
+    
+    if ($recentRecords.Count -gt 0) {
+        $latestRecord = $recentRecords[0]
+        Write-Host "   ✅ Registro mais recente encontrado (ID: $($latestRecord.id))" -ForegroundColor Green
+        
+        # Verificar novas colunas
+        $newColumns = @("requested_fields", "clarification_question", "observations")
+        $missingColumns = @()
+        
+        foreach ($column in $newColumns) {
+            if ($latestRecord.PSObject.Properties.Name -contains $column) {
+                Write-Host "   ✅ Coluna '$column' presente" -ForegroundColor Green
+                if ($latestRecord.$column) {
+                    Write-Host "      📝 Valor: $($latestRecord.$column)" -ForegroundColor Gray
+                } else {
+                    Write-Host "      📝 Valor: null/vazio" -ForegroundColor Gray
+                }
+            } else {
+                Write-Host "   ❌ Coluna '$column' ausente" -ForegroundColor Red
+                $missingColumns += $column
+            }
+        }
+        
+        if ($missingColumns.Count -eq 0) {
+            Write-Host "   ✅ Todas as novas colunas estão presentes" -ForegroundColor Green
+        } else {
+            Write-Host "   ⚠️  Colunas ausentes: $($missingColumns -join ', ')" -ForegroundColor Yellow
+        }
+        
+        # Verificar se os dados foram salvos corretamente
+        if ($latestRecord.text_input -and $latestRecord.processed_data) {
+            Write-Host "   ✅ Dados principais salvos corretamente" -ForegroundColor Green
+        } else {
+            Write-Host "   ⚠️  Dados principais incompletos" -ForegroundColor Yellow
+        }
+        
+    } else {
+        Write-Host "   ⚠️  Nenhum registro recente encontrado" -ForegroundColor Yellow
+    }
+    
+} catch {
+    Write-Host "   ❌ Erro ao validar colunas: $($_.Exception.Message)" -ForegroundColor Red
+}
+
+# =============================================================================
+# TESTE 2.5: Verificar diferentes status no banco
+# =============================================================================
+Write-Host "`n   📋 Teste 2.5: Verificando diferentes status..." -ForegroundColor Yellow
+
+try {
+    # Buscar registros com diferentes status
+    $statuses = @("completed", "validating")
+    
+    foreach ($status in $statuses) {
+        $records = Invoke-RestMethod -Uri "$baseUrl/$testTable?status=eq.$status" -Method GET -TimeoutSec 10
+        Write-Host "   📊 Status '$status': $($records.Count) registros" -ForegroundColor Gray
+        
+        if ($records.Count -gt 0) {
+            $avgConfidence = ($records | Measure-Object -Property confidence_score -Average).Average
+            Write-Host "      🎯 Confiança média: $([math]::Round($avgConfidence, 2))" -ForegroundColor Gray
+        }
+    }
+    
+} catch {
+    Write-Host "   ❌ Erro ao verificar status: $($_.Exception.Message)" -ForegroundColor Red
+}
+
+# =============================================================================
 # RESUMO DOS TESTES
 # =============================================================================
 Write-Host "`n==================================================" -ForegroundColor Cyan
